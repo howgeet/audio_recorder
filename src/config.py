@@ -27,7 +27,7 @@ class Config:
         self.languages: list = ["tr", "en"]  # Turkish and English
         
         # Output Settings
-        self.output_dir: Path = Path(os.getenv("OUTPUT_DIR", "outputs"))
+        self.output_dir: Path = Path(os.getenv("OUTPUT_DIR", str(Path.home() / "Documents" / "audio_recorder_outputs")))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Diarization Settings
