@@ -24,6 +24,8 @@ class Config:
         
         # Transcription Settings (OpenAI Whisper)
         self.transcription_model: str = os.getenv("WHISPER_MODEL", "whisper-1")
+        self.whisper_language: str = os.getenv("WHISPER_LANGUAGE", "tr")
+        self.local_whisper_model: str = os.getenv("LOCAL_WHISPER_MODEL", "medium")
         self.languages: list = ["tr", "en"]  # Turkish and English
         
         # Output Settings
@@ -58,6 +60,8 @@ Configuration:
   Sample Rate: {self.sample_rate} Hz
   Channels: {self.channels}
   Transcription Model: {self.transcription_model}
+  Whisper Language: {self.whisper_language}
+  Local Whisper Model: {self.local_whisper_model}
   LLM Model: {self.llm_model}
   Output Directory: {self.output_dir}
   Min Speakers: {self.min_speakers}

@@ -51,13 +51,16 @@ class LocalTranscriber:
             if progress_callback:
                 progress_callback(msg)
 
+        selected_language = language or getattr(config, "whisper_language", "tr")
+
         log(f"\n🖥️  Starting local transcription (faster-whisper {self.model_size})...")
         log(f"   File: {audio_file.name}")
+        log(f"   Language: {selected_language}")
 
         start_time = time.time()
         segments_iter, info = self.model.transcribe(
             str(audio_file),
-            language=language,
+            language=selected_language,
             beam_size=5
         )
 
@@ -96,6 +99,8 @@ class Transcriber:
         """Initialize the transcriber."""
         self.client = OpenAI(api_key=config.openai_api_key or "")
         self.model = config.transcription_model
+        self.default_language = getattr(config, "whisper_language", "tr")
+        self.local_model_size = getattr(config, "local_whisper_model", "medium")
         
     def _get_file_size(self, audio_file: Path) -> int:
         """Get file size in bytes."""
@@ -307,9 +312,12 @@ class Transcriber:
             if progress_callback:
                 progress_callback(msg)
         
+        selected_language = language or self.default_language
+
         log(f"\n🎙️  Starting transcription...")
         log(f"   File: {audio_file.name}")
         log(f"   Model: {self.model}")
+        log(f"   Language: {selected_language}")
         
         if not audio_file.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_file}")
@@ -341,7 +349,7 @@ class Transcriber:
                     for i, chunk_path in enumerate(chunk_paths):
                         log(f"📝 Processing chunk {i + 1} of {num_chunks}...")
                         
-                        transcript = self._transcribe_single_chunk(chunk_path, language)
+                        transcript = self._transcribe_single_chunk(chunk_path, selected_language)
                         transcripts.append(transcript)
                         
                         log(f"   ✅ Chunk {i + 1} complete")
@@ -356,7 +364,7 @@ class Transcriber:
                     log(f"🧹 Cleaned up temporary files")
             else:
                 # File is small enough, process directly
-                result = self._transcribe_single_chunk(audio_file, language)
+                result = self._transcribe_single_chunk(audio_file, selected_language)
             
             elapsed_time = time.time() - start_time
             
@@ -421,8 +429,12 @@ class Transcriber:
                     log(f"⚠️  OpenAI transcription unavailable: {e}")
                     log(f"🔄 Falling back to local Whisper model...")
                     try:
-                        local = LocalTranscriber()
-                        return local.transcribe_audio(audio_file, progress_callback=progress_callback)
+                        local = LocalTranscriber(self.local_model_size)
+                        return local.transcribe_audio(
+                            audio_file,
+                            language=self.default_language,
+                            progress_callback=progress_callback
+                        )
                     except Exception as local_err:
                         log(f"❌ Local transcription also failed: {local_err}")
                         raise

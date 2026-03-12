@@ -30,7 +30,8 @@ class AudioCapture:
         self.sample_rate = config.sample_rate
         self.channels = config.channels
         self.is_recording = False
-        self.audio_data = []
+        self.mic_audio_data = []
+        self.system_audio_data = []
         self.lock = threading.Lock()
         
         # Get default devices
@@ -53,7 +54,8 @@ class AudioCapture:
     def start_recording(self):
         """Start recording audio from both microphone and system audio."""
         self.is_recording = True
-        self.audio_data = []
+        self.mic_audio_data = []
+        self.system_audio_data = []
         
         print("\n🎤 Starting audio capture...")
         print(f"   Sample Rate: {self.sample_rate} Hz")
@@ -76,7 +78,7 @@ class AudioCapture:
                     print(f"Microphone status: {status}")
                 if self.is_recording:
                     with self.lock:
-                        self.audio_data.append(indata.copy())
+                        self.mic_audio_data.append(indata.copy())
             
             with sd.InputStream(
                 samplerate=self.sample_rate,
@@ -148,7 +150,7 @@ class AudioCapture:
                                         system_audio = np.mean(system_audio, axis=1, keepdims=True)
                                     elif self.channels == 2 and system_audio.shape[1] == 1:
                                         system_audio = np.repeat(system_audio, 2, axis=1)
-                                self.audio_data.append(system_audio)
+                                self.system_audio_data.append(system_audio)
                     except Exception as e:
                         if self.is_recording:
                             print(f"⚠️  System audio recording error: {e}")
@@ -174,10 +176,13 @@ class AudioCapture:
             self.system_thread.join(timeout=2)
         
         # Save audio data
-        if self.audio_data:
+        if self.mic_audio_data or self.system_audio_data:
             print(f"💾 Saving audio to: {self.output_file}")
             self._save_audio()
-            print(f"✅ Audio saved successfully! ({len(self.audio_data)} chunks)")
+            print(
+                "✅ Audio saved successfully! "
+                f"(mic chunks: {len(self.mic_audio_data)}, system chunks: {len(self.system_audio_data)})"
+            )
         else:
             print("⚠️  No audio data recorded!")
         
@@ -186,10 +191,24 @@ class AudioCapture:
     def _save_audio(self):
         """Save recorded audio data to WAV file."""
         try:
-            # Concatenate all audio chunks
+            # Concatenate each source independently, then mix.
             with self.lock:
-                audio_array = np.concatenate(self.audio_data, axis=0)
-            
+                mic_array = np.concatenate(self.mic_audio_data, axis=0) if self.mic_audio_data else None
+                system_array = np.concatenate(self.system_audio_data, axis=0) if self.system_audio_data else None
+
+            if mic_array is not None and system_array is not None:
+                min_len = min(len(mic_array), len(system_array))
+                if min_len == 0:
+                    raise ValueError("Captured audio has zero length")
+                # Weighted average helps avoid clipping when both channels are active.
+                audio_array = 0.5 * mic_array[:min_len] + 0.5 * system_array[:min_len]
+            elif mic_array is not None:
+                audio_array = mic_array
+            elif system_array is not None:
+                audio_array = system_array
+            else:
+                raise ValueError("No audio frames available to save")
+
             # Ensure output directory exists
             self.output_file.parent.mkdir(parents=True, exist_ok=True)
             
@@ -200,7 +219,8 @@ class AudioCapture:
                 wf.setframerate(self.sample_rate)
                 
                 # Convert float32 to int16
-                audio_int16 = (audio_array * 32767).astype(np.int16)
+                audio_clipped = np.clip(audio_array, -1.0, 1.0)
+                audio_int16 = (audio_clipped * 32767).astype(np.int16)
                 wf.writeframes(audio_int16.tobytes())
                 
         except Exception as e:
@@ -273,7 +293,8 @@ class SimpleAudioCapture:
                 wf.setnchannels(self.channels)
                 wf.setsampwidth(2)
                 wf.setframerate(self.sample_rate)
-                audio_int16 = (audio_array * 32767).astype(np.int16)
+                audio_clipped = np.clip(audio_array, -1.0, 1.0)
+                audio_int16 = (audio_clipped * 32767).astype(np.int16)
                 wf.writeframes(audio_int16.tobytes())
         except Exception as e:
             print(f"❌ Error saving audio: {e}")
