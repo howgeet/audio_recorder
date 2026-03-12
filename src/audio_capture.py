@@ -1,10 +1,11 @@
 """Audio capture module for Windows - captures both microphone and system audio."""
 
+import os
 import wave
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List
 import numpy as np
 
 try:
@@ -32,6 +33,12 @@ class AudioCapture:
         self.is_recording = False
         self.mic_audio_data = []
         self.system_audio_data = []
+        self.mic_samples_buffered = 0
+        self.system_samples_buffered = 0
+        self.segment_files: List[Path] = []
+        self.segment_index = 1
+        self.segment_duration_seconds = int(os.getenv("RECORDING_SEGMENT_SECONDS", "300"))
+        self.segment_samples_target = max(1, self.segment_duration_seconds * self.sample_rate)
         self.lock = threading.Lock()
         
         # Get default devices
@@ -56,6 +63,10 @@ class AudioCapture:
         self.is_recording = True
         self.mic_audio_data = []
         self.system_audio_data = []
+        self.mic_samples_buffered = 0
+        self.system_samples_buffered = 0
+        self.segment_files = []
+        self.segment_index = 1
         
         print("\n🎤 Starting audio capture...")
         print(f"   Sample Rate: {self.sample_rate} Hz")
@@ -78,7 +89,11 @@ class AudioCapture:
                     print(f"Microphone status: {status}")
                 if self.is_recording:
                     with self.lock:
-                        self.mic_audio_data.append(indata.copy())
+                        mic_chunk = indata.copy()
+                        self.mic_audio_data.append(mic_chunk)
+                        self.mic_samples_buffered += len(mic_chunk)
+                        while self._flush_next_segment_locked(force=False):
+                            pass
             
             with sd.InputStream(
                 samplerate=self.sample_rate,
@@ -151,6 +166,9 @@ class AudioCapture:
                                     elif self.channels == 2 and system_audio.shape[1] == 1:
                                         system_audio = np.repeat(system_audio, 2, axis=1)
                                 self.system_audio_data.append(system_audio)
+                                self.system_samples_buffered += len(system_audio)
+                                while self._flush_next_segment_locked(force=False):
+                                    pass
                     except Exception as e:
                         if self.is_recording:
                             print(f"⚠️  System audio recording error: {e}")
@@ -174,58 +192,99 @@ class AudioCapture:
             self.mic_thread.join(timeout=2)
         if hasattr(self, 'system_thread'):
             self.system_thread.join(timeout=2)
+
+        with self.lock:
+            while self._flush_next_segment_locked(force=False):
+                pass
+            self._flush_next_segment_locked(force=True)
         
         # Save audio data
-        if self.mic_audio_data or self.system_audio_data:
-            print(f"💾 Saving audio to: {self.output_file}")
-            self._save_audio()
-            print(
-                "✅ Audio saved successfully! "
-                f"(mic chunks: {len(self.mic_audio_data)}, system chunks: {len(self.system_audio_data)})"
-            )
+        if self.segment_files:
+            print(f"💾 Audio parts saved in: {self.output_file.parent}")
+            print(f"✅ Audio saved successfully! ({len(self.segment_files)} wav parts)")
         else:
             print("⚠️  No audio data recorded!")
         
-        return self.output_file
+        return self.segment_files[0] if self.segment_files else self.output_file
+
+    def get_recorded_files(self) -> List[Path]:
+        """Return sorted list of recorded WAV part files."""
+        return sorted(self.segment_files)
     
-    def _save_audio(self):
-        """Save recorded audio data to WAV file."""
-        try:
-            # Concatenate each source independently, then mix.
-            with self.lock:
-                mic_array = np.concatenate(self.mic_audio_data, axis=0) if self.mic_audio_data else None
-                system_array = np.concatenate(self.system_audio_data, axis=0) if self.system_audio_data else None
+    def _available_samples_locked(self) -> int:
+        """Get number of samples currently available for the next output segment."""
+        if self.mic_audio_data and self.system_audio_data:
+            return min(self.mic_samples_buffered, self.system_samples_buffered)
+        if self.mic_audio_data:
+            return self.mic_samples_buffered
+        if self.system_audio_data:
+            return self.system_samples_buffered
+        return 0
 
-            if mic_array is not None and system_array is not None:
-                min_len = min(len(mic_array), len(system_array))
-                if min_len == 0:
-                    raise ValueError("Captured audio has zero length")
-                # Weighted average helps avoid clipping when both channels are active.
-                audio_array = 0.5 * mic_array[:min_len] + 0.5 * system_array[:min_len]
-            elif mic_array is not None:
-                audio_array = mic_array
-            elif system_array is not None:
-                audio_array = system_array
+    @staticmethod
+    def _consume_samples(chunks: list, samples_needed: int) -> np.ndarray:
+        """Consume a fixed number of samples from chunk list (in-place)."""
+        consumed = []
+        remaining = samples_needed
+        while remaining > 0 and chunks:
+            chunk = chunks[0]
+            take = min(remaining, len(chunk))
+            consumed.append(chunk[:take])
+            if take == len(chunk):
+                chunks.pop(0)
             else:
-                raise ValueError("No audio frames available to save")
+                chunks[0] = chunk[take:]
+            remaining -= take
 
-            # Ensure output directory exists
-            self.output_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Save as WAV file
-            with wave.open(str(self.output_file), 'wb') as wf:
-                wf.setnchannels(self.channels)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(self.sample_rate)
-                
-                # Convert float32 to int16
-                audio_clipped = np.clip(audio_array, -1.0, 1.0)
-                audio_int16 = (audio_clipped * 32767).astype(np.int16)
-                wf.writeframes(audio_int16.tobytes())
-                
-        except Exception as e:
-            print(f"❌ Error saving audio file: {e}")
-            raise
+        if remaining > 0:
+            raise ValueError("Not enough buffered samples to consume")
+
+        return np.concatenate(consumed, axis=0) if consumed else np.empty((0, 1), dtype=np.float32)
+
+    def _flush_next_segment_locked(self, force: bool) -> bool:
+        """Flush one WAV segment from buffered samples.
+
+        Returns True if a segment was written.
+        """
+        available = self._available_samples_locked()
+        if available <= 0:
+            return False
+
+        if not force and available < self.segment_samples_target:
+            return False
+
+        segment_samples = available if force else self.segment_samples_target
+
+        if self.mic_audio_data and self.system_audio_data:
+            mic_array = self._consume_samples(self.mic_audio_data, segment_samples)
+            system_array = self._consume_samples(self.system_audio_data, segment_samples)
+            self.mic_samples_buffered -= segment_samples
+            self.system_samples_buffered -= segment_samples
+            audio_array = 0.5 * mic_array + 0.5 * system_array
+        elif self.mic_audio_data:
+            audio_array = self._consume_samples(self.mic_audio_data, segment_samples)
+            self.mic_samples_buffered -= segment_samples
+        else:
+            audio_array = self._consume_samples(self.system_audio_data, segment_samples)
+            self.system_samples_buffered -= segment_samples
+
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        segment_path = self.output_file.with_name(
+            f"{self.output_file.stem}_part{self.segment_index:03d}.wav"
+        )
+        self.segment_index += 1
+
+        audio_clipped = np.clip(audio_array, -1.0, 1.0)
+        audio_int16 = (audio_clipped * 32767).astype(np.int16)
+
+        with wave.open(str(segment_path), 'wb') as wf:
+            wf.setnchannels(self.channels)
+            wf.setsampwidth(2)
+            wf.setframerate(self.sample_rate)
+            wf.writeframes(audio_int16.tobytes())
+
+        self.segment_files.append(segment_path)
+        return True
 
 class SimpleAudioCapture:
     """Simplified audio capture using only microphone (fallback option)."""
@@ -241,11 +300,20 @@ class SimpleAudioCapture:
         self.channels = 1  # Mono for simplicity
         self.is_recording = False
         self.audio_data = []
+        self.samples_buffered = 0
+        self.segment_files: List[Path] = []
+        self.segment_index = 1
+        self.segment_duration_seconds = int(os.getenv("RECORDING_SEGMENT_SECONDS", "300"))
+        self.segment_samples_target = max(1, self.segment_duration_seconds * self.sample_rate)
+        self.lock = threading.Lock()
         
     def start_recording(self):
         """Start recording audio from microphone only."""
         self.is_recording = True
         self.audio_data = []
+        self.samples_buffered = 0
+        self.segment_files = []
+        self.segment_index = 1
         
         print("\n🎤 Starting microphone recording (simplified mode)...")
         print(f"   Sample Rate: {self.sample_rate} Hz")
@@ -254,7 +322,12 @@ class SimpleAudioCapture:
             if status:
                 print(f"Status: {status}")
             if self.is_recording:
-                self.audio_data.append(indata.copy())
+                with self.lock:
+                    chunk = indata.copy()
+                    self.audio_data.append(chunk)
+                    self.samples_buffered += len(chunk)
+                    while self._flush_next_segment_locked(force=False):
+                        pass
         
         self.stream = sd.InputStream(
             samplerate=self.sample_rate,
@@ -273,29 +346,67 @@ class SimpleAudioCapture:
         if hasattr(self, 'stream'):
             self.stream.stop()
             self.stream.close()
+
+        with self.lock:
+            while self._flush_next_segment_locked(force=False):
+                pass
+            self._flush_next_segment_locked(force=True)
         
-        if self.audio_data:
-            print(f"💾 Saving audio to: {self.output_file}")
-            self._save_audio()
-            print(f"✅ Audio saved! ({len(self.audio_data)} chunks)")
+        if self.segment_files:
+            print(f"💾 Audio parts saved in: {self.output_file.parent}")
+            print(f"✅ Audio saved! ({len(self.segment_files)} wav parts)")
         else:
             print("⚠️  No audio data recorded!")
         
-        return self.output_file
+        return self.segment_files[0] if self.segment_files else self.output_file
+
+    def get_recorded_files(self) -> List[Path]:
+        """Return sorted list of recorded WAV part files."""
+        return sorted(self.segment_files)
     
-    def _save_audio(self):
-        """Save recorded audio data to WAV file."""
-        try:
-            audio_array = np.concatenate(self.audio_data, axis=0)
-            self.output_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            with wave.open(str(self.output_file), 'wb') as wf:
-                wf.setnchannels(self.channels)
-                wf.setsampwidth(2)
-                wf.setframerate(self.sample_rate)
-                audio_clipped = np.clip(audio_array, -1.0, 1.0)
-                audio_int16 = (audio_clipped * 32767).astype(np.int16)
-                wf.writeframes(audio_int16.tobytes())
-        except Exception as e:
-            print(f"❌ Error saving audio: {e}")
-            raise
+    @staticmethod
+    def _consume_samples(chunks: list, samples_needed: int) -> np.ndarray:
+        consumed = []
+        remaining = samples_needed
+        while remaining > 0 and chunks:
+            chunk = chunks[0]
+            take = min(remaining, len(chunk))
+            consumed.append(chunk[:take])
+            if take == len(chunk):
+                chunks.pop(0)
+            else:
+                chunks[0] = chunk[take:]
+            remaining -= take
+
+        if remaining > 0:
+            raise ValueError("Not enough buffered samples to consume")
+
+        return np.concatenate(consumed, axis=0) if consumed else np.empty((0, 1), dtype=np.float32)
+
+    def _flush_next_segment_locked(self, force: bool) -> bool:
+        if self.samples_buffered <= 0:
+            return False
+        if not force and self.samples_buffered < self.segment_samples_target:
+            return False
+
+        segment_samples = self.samples_buffered if force else self.segment_samples_target
+        audio_array = self._consume_samples(self.audio_data, segment_samples)
+        self.samples_buffered -= segment_samples
+
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        segment_path = self.output_file.with_name(
+            f"{self.output_file.stem}_part{self.segment_index:03d}.wav"
+        )
+        self.segment_index += 1
+
+        audio_clipped = np.clip(audio_array, -1.0, 1.0)
+        audio_int16 = (audio_clipped * 32767).astype(np.int16)
+
+        with wave.open(str(segment_path), 'wb') as wf:
+            wf.setnchannels(self.channels)
+            wf.setsampwidth(2)
+            wf.setframerate(self.sample_rate)
+            wf.writeframes(audio_int16.tobytes())
+
+        self.segment_files.append(segment_path)
+        return True

@@ -438,6 +438,59 @@ class Transcriber:
                     except Exception as local_err:
                         log(f"❌ Local transcription also failed: {local_err}")
                         raise
+
+    def transcribe_audio_files_with_retry(
+        self,
+        audio_files: List[Path],
+        max_retries: int = 3,
+        progress_callback: Optional[Callable[[str], None]] = None
+    ) -> Dict[str, Any]:
+        """Transcribe multiple audio files and merge into one timeline.
+
+        This is useful for long recordings that are saved as partial WAV files.
+        """
+        if not audio_files:
+            raise ValueError("No audio files provided for transcription")
+
+        ordered_files = sorted(audio_files)
+        transcripts: List[Dict[str, Any]] = []
+        chunk_offsets_ms: List[float] = []
+        cumulative_offset_seconds = 0.0
+
+        def log(msg: str):
+            print(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        for idx, part_file in enumerate(ordered_files, start=1):
+            if not part_file.exists() or part_file.stat().st_size == 0:
+                log(f"⚠️  Skipping empty or missing part: {part_file}")
+                continue
+
+            log(f"🎧 Transcribing part {idx}/{len(ordered_files)}: {part_file.name}")
+            chunk_offsets_ms.append(cumulative_offset_seconds * 1000.0)
+            part_result = self.transcribe_with_retry(
+                part_file,
+                max_retries=max_retries,
+                progress_callback=progress_callback
+            )
+            transcripts.append(part_result)
+
+            part_duration = part_result.get('duration')
+            if not part_duration:
+                try:
+                    part_duration = get_audio_duration(part_file)
+                except Exception:
+                    part_duration = 0
+            cumulative_offset_seconds += float(part_duration or 0)
+
+        if not transcripts:
+            raise ValueError("No valid audio parts were transcribed")
+
+        if len(transcripts) == 1:
+            return transcripts[0]
+
+        return self._merge_transcripts(transcripts, chunk_offsets_ms)
     
     def format_transcript(self, transcription_result: Dict[str, Any]) -> str:
         """Format transcription result into readable text.

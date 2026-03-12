@@ -5,7 +5,7 @@ import time
 import signal
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from src.config import config
 from src.audio_capture import AudioCapture, SimpleAudioCapture
@@ -96,27 +96,37 @@ class MeetingTranscriber:
             
             # Stop audio capture
             audio_file = self.audio_capture.stop_recording()
+            audio_files: List[Path] = []
+            if hasattr(self.audio_capture, 'get_recorded_files'):
+                audio_files = [p for p in self.audio_capture.get_recorded_files() if p.exists() and p.stat().st_size > 0]
+
             self.is_recording = False
-            
-            if not audio_file.exists() or audio_file.stat().st_size == 0:
+
+            if audio_files:
+                print(f"\n✅ Audio parts saved: {len(audio_files)}")
+                for part in audio_files:
+                    print(f"   - {part.name} ({part.stat().st_size / (1024*1024):.2f} MB)")
+            elif not audio_file.exists() or audio_file.stat().st_size == 0:
                 print("❌ No audio recorded. Exiting.")
                 return
-            
-            print(f"\n✅ Audio file saved: {audio_file}")
-            print(f"   Size: {audio_file.stat().st_size / (1024*1024):.2f} MB")
+
+            if not audio_files:
+                print(f"\n✅ Audio file saved: {audio_file}")
+                print(f"   Size: {audio_file.stat().st_size / (1024*1024):.2f} MB")
             
             # Process the recording
-            self.process_meeting(audio_file)
+            self.process_meeting(audio_file, audio_files=audio_files)
             
         except Exception as e:
             print(f"\n❌ Error stopping recording: {e}")
             raise
     
-    def process_meeting(self, audio_file: Path):
+    def process_meeting(self, audio_file: Path, audio_files: Optional[List[Path]] = None):
         """Process the recorded meeting.
         
         Args:
-            audio_file: Path to recorded audio file
+            audio_file: Path to recorded audio file (or first segment)
+            audio_files: Optional list of recorded audio segments
         """
         print("\n" + "=" * 80)
         print("🛠️ PROCESSING MEETING")
@@ -133,7 +143,12 @@ class MeetingTranscriber:
             print("\n[1/4] Transcribing audio...")
             transcriber = Transcriber()
             start_time = time.time()
-            transcription_result = transcriber.transcribe_with_retry(audio_file)
+            valid_audio_files = [p for p in (audio_files or []) if p.exists() and p.stat().st_size > 0]
+            if len(valid_audio_files) > 1:
+                transcription_result = transcriber.transcribe_audio_files_with_retry(valid_audio_files)
+                metadata['audio_parts'] = [str(p) for p in valid_audio_files]
+            else:
+                transcription_result = transcriber.transcribe_with_retry(audio_file)
             transcription_time = time.time() - start_time
             
             metadata['transcription_time'] = transcription_time

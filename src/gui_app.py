@@ -818,8 +818,18 @@ class MeetingTranscriberGUI(QMainWindow):
         try:
             self.message_queue.put(("progress", 100))
             audio_file = self.audio_capture.stop_recording()
-            self.message_queue.put(("log", (f"Audio saved: {audio_file.name}", "success")))
-            if not audio_file.exists() or audio_file.stat().st_size == 0:
+            audio_files = []
+            if hasattr(self.audio_capture, 'get_recorded_files'):
+                audio_files = [p for p in self.audio_capture.get_recorded_files() if p.exists() and p.stat().st_size > 0]
+
+            if audio_files:
+                self.message_queue.put(("log", (f"Audio parts saved: {len(audio_files)}", "success")))
+                for part in audio_files:
+                    self.message_queue.put(("log", (f" - {part.name}", "info")))
+            else:
+                self.message_queue.put(("log", (f"Audio saved: {audio_file.name}", "success")))
+
+            if not audio_files and (not audio_file.exists() or audio_file.stat().st_size == 0):
                 raise Exception("No audio was recorded.")
 
             self.message_queue.put(("progress", 200))
