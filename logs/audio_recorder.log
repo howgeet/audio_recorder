@@ -1,0 +1,17 @@
+2026-03-13 11:49:14 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:49:14 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:49:14 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:56:08 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:56:08 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:56:08 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:56:35 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-13 11:56:36 | INFO | src.summarization | Starting summarization. language=turkish transcript_chars=192
+2026-03-13 11:56:43 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-13 11:56:43 | INFO | src.summarization | Summarization completed with OpenAI in 7.14 seconds
+2026-03-13 11:59:36 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:59:36 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 11:59:36 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 12:00:46 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-13 12:00:47 | INFO | src.summarization | Starting summarization. language=turkish transcript_chars=3525
+2026-03-13 12:01:03 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-13 12:01:03 | INFO | src.summarization | Summarization completed with OpenAI in 16.19 seconds

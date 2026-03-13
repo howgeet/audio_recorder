@@ -1,5 +1,6 @@
 """Main application for Meeting Transcriber."""
 
+import logging
 import sys
 import time
 import signal
@@ -13,6 +14,10 @@ from src.transcription import Transcriber
 from src.diarization import SpeakerDiarizer
 from src.summarization import MeetingSummarizer
 from src.file_manager import FileManager
+from src.logging_utils import setup_logging
+
+
+logger = logging.getLogger(__name__)
 
 class MeetingTranscriber:
     """Main application class for meeting transcription."""
@@ -27,6 +32,9 @@ class MeetingTranscriber:
         self.file_manager: Optional[FileManager] = None
         self.audio_capture = None
         self.is_recording = False
+
+        log_path = setup_logging()
+        logger.info("MeetingTranscriber initialized. log_file=%s", log_path)
         
         # Initialize components
         print("\n" + "=" * 80)
@@ -80,6 +88,7 @@ class MeetingTranscriber:
             print("\nPress Ctrl+C or type 'stop' to end recording...\n")
             
         except Exception as e:
+            logger.exception("Error starting recording")
             print(f"\n❌ Error starting recording: {e}")
             raise
     
@@ -118,6 +127,7 @@ class MeetingTranscriber:
             self.process_meeting(audio_file, audio_files=audio_files)
             
         except Exception as e:
+            logger.exception("Error stopping recording")
             print(f"\n❌ Error stopping recording: {e}")
             raise
     
@@ -202,6 +212,7 @@ class MeetingTranscriber:
             print(f"\n📂 All files saved to: {self.file_manager.meeting_dir}")
             
         except Exception as e:
+            logger.exception("Error processing meeting")
             print(f"\n❌ Error processing meeting: {e}")
             import traceback
             traceback.print_exc()
@@ -214,6 +225,9 @@ def signal_handler(sig, frame):
 
 def main():
     """Main entry point."""
+    log_path = setup_logging()
+    logger.info("CLI main started. log_file=%s", log_path)
+
     # Register signal handler for Ctrl+C
     signal.signal(signal.SIGINT, signal_handler)
     
@@ -250,6 +264,7 @@ def main():
         if app.is_recording:
             app.stop_recording()
     except Exception as e:
+        logger.exception("Fatal CLI error")
         print(f"\n❌ Fatal error: {e}")
         import traceback
         traceback.print_exc()

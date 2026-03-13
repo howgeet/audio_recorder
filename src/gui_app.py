@@ -1,14 +1,16 @@
 """Modern GUI Application for Meeting Transcriber using PySide6."""
 
+import logging
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import queue
 import sys
 import os
 import shutil
+import re
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -29,6 +31,7 @@ from src.transcription import Transcriber
 from src.diarization import SpeakerDiarizer
 from src.summarization import MeetingSummarizer
 from src.file_manager import FileManager
+from src.logging_utils import setup_logging
 from src.ffmpeg_utils import (
     check_ffmpeg_installed,
     get_ffmpeg_error_message,
@@ -141,6 +144,9 @@ QStatusBar {{ background-color: {CARD_BG}; color: {TEXT_MUTED}; font-size: 12px;
 QLabel {{ color: {TEXT_PRIMARY}; }}
 QFrame#separator {{ background-color: {BORDER_COLOR}; }}
 """
+
+
+logger = logging.getLogger(__name__)
 
 
 class StatusIndicator(QWidget):
@@ -334,6 +340,9 @@ class MeetingTranscriberGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        log_path = setup_logging()
+        logger.info("GUI initialized. log_file=%s", log_path)
+
         self.setWindowTitle("Meeting Transcriber Pro")
         self.resize(1200, 800)
         self.setMinimumSize(900, 600)
@@ -581,7 +590,8 @@ class MeetingTranscriberGUI(QMainWindow):
         reply = QMessageBox.question(
             self, "No API Key",
             "OpenAI API key is not set.\n\n"
-            "Transcription will use the local Whisper model (slower, no summary).\n\n"
+            "Transcription will use local Whisper fallback (slower).\n"
+            "Summarization will try Hugging Face transformers fallback.\n\n"
             "Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -700,24 +710,53 @@ class MeetingTranscriberGUI(QMainWindow):
             self.message_queue.put(("log", (f"Error extracting audio: {e}", "error")))
             return False
 
+    def _find_related_wav_parts(self, selected_wav: Path) -> List[Path]:
+        """Return all sibling WAV parts when selected file is *_partNNN.wav."""
+        match = re.match(r"^(?P<prefix>.+)_part\d+$", selected_wav.stem, re.IGNORECASE)
+        if not match:
+            return [selected_wav]
+
+        pattern = f"{match.group('prefix')}_part*.wav"
+        related = sorted(
+            p for p in selected_wav.parent.glob(pattern)
+            if p.exists() and p.stat().st_size > 0
+        )
+
+        if not related:
+            return [selected_wav]
+        return related
+
     def _file_processing_thread(self):
         try:
             self.file_manager = FileManager()
             file_ext = self.selected_file_path.suffix.lower()
             is_video = file_ext in SUPPORTED_VIDEO_FORMATS
             self.message_queue.put(("progress", 50))
+            audio_files: List[Path] = []
 
             if is_video:
                 self.message_queue.put(("log", ("Preparing to extract audio from video...", "progress")))
                 audio_file = self.file_manager.meeting_dir / "extracted_audio.wav"
                 if not self._extract_audio_from_video(self.selected_file_path, audio_file):
                     raise Exception("Failed to extract audio from video file.")
+                audio_files = [audio_file]
                 self.message_queue.put(("progress", 150))
             else:
                 if file_ext == '.wav':
-                    audio_file = self.file_manager.meeting_dir / self.selected_file_path.name
-                    shutil.copy2(self.selected_file_path, audio_file)
-                    self.message_queue.put(("log", ("Copied audio file to outputs", "info")))
+                    source_audio_files = self._find_related_wav_parts(self.selected_file_path)
+                    if len(source_audio_files) > 1:
+                        self.message_queue.put((
+                            "log",
+                            (f"Detected {len(source_audio_files)} WAV parts in folder. Processing all parts...", "info")
+                        ))
+
+                    for src in source_audio_files:
+                        dest = self.file_manager.meeting_dir / src.name
+                        shutil.copy2(src, dest)
+                        audio_files.append(dest)
+
+                    audio_file = audio_files[0]
+                    self.message_queue.put(("log", (f"Copied {len(audio_files)} audio file(s) to outputs", "info")))
                 else:
                     self.message_queue.put(("log", (f"Converting {file_ext} to WAV format...", "progress")))
                     try:
@@ -725,6 +764,7 @@ class MeetingTranscriberGUI(QMainWindow):
                             raise FFmpegError(get_ffmpeg_error_message())
                         audio_file = self.file_manager.meeting_dir / "converted_audio.wav"
                         convert_audio_format(self.selected_file_path, audio_file, output_format='wav')
+                        audio_files = [audio_file]
                         self.message_queue.put(("log", ("Audio conversion complete!", "success")))
                     except FFmpegError as e:
                         self.message_queue.put(("log", (f"FFmpeg error: {e}", "error")))
@@ -732,12 +772,17 @@ class MeetingTranscriberGUI(QMainWindow):
                     except Exception as e:
                         self.message_queue.put(("log", (f"Conversion failed, using original: {e}", "warning")))
                         audio_file = self.selected_file_path
+                        audio_files = [audio_file]
                 self.message_queue.put(("progress", 150))
 
-            if not audio_file.exists() or audio_file.stat().st_size == 0:
+            if not audio_files:
+                audio_files = [audio_file]
+
+            valid_audio_files = [p for p in audio_files if p.exists() and p.stat().st_size > 0]
+            if not valid_audio_files:
                 raise Exception("Audio file is empty or does not exist.")
 
-            self.message_queue.put(("log", (f"Audio file ready: {audio_file.name}", "success")))
+            self.message_queue.put(("log", (f"Audio files ready: {len(valid_audio_files)}", "success")))
             self.message_queue.put(("progress", 200))
             self.message_queue.put(("log", ("Starting transcription...", "progress")))
 
@@ -747,7 +792,16 @@ class MeetingTranscriberGUI(QMainWindow):
                     self.message_queue.put(("log", (clean, "progress")))
 
             transcriber = Transcriber()
-            transcription_result = transcriber.transcribe_with_retry(audio_file, progress_callback=transcription_progress)
+            if len(valid_audio_files) > 1:
+                transcription_result = transcriber.transcribe_audio_files_with_retry(
+                    valid_audio_files,
+                    progress_callback=transcription_progress
+                )
+            else:
+                transcription_result = transcriber.transcribe_with_retry(
+                    valid_audio_files[0],
+                    progress_callback=transcription_progress
+                )
             transcript_text = transcriber.format_transcript(transcription_result)
             self.file_manager.save_transcript(transcript_text)
             self.message_queue.put(("transcript", transcript_text))
@@ -773,12 +827,13 @@ class MeetingTranscriberGUI(QMainWindow):
                 self.message_queue.put(("summary", summary_text))
                 self.message_queue.put(("log", ("Summary generated!", "success")))
             except Exception as summ_err:
-                self.message_queue.put(("log", (f"Summarization skipped (OpenAI unavailable): {summ_err}", "warning")))
+                self.message_queue.put(("log", (f"Summarization failed (OpenAI + HF fallback): {summ_err}", "warning")))
             self.message_queue.put(("progress", 1000))
             self.message_queue.put(("log", (f"All files saved to: {self.file_manager.meeting_dir}", "success")))
             self.message_queue.put(("file_complete", str(self.file_manager.meeting_dir)))
 
         except Exception as e:
+            logger.exception("Error in file processing thread")
             import traceback; traceback.print_exc()
             self.message_queue.put(("log", (f"Processing error: {e}", "error")))
             self.message_queue.put(("error", str(e)))
@@ -796,6 +851,7 @@ class MeetingTranscriberGUI(QMainWindow):
             self.audio_capture.start_recording()
             self.message_queue.put(("log", ("Recording started successfully!", "success")))
         except Exception as e:
+            logger.exception("Error starting recording thread")
             self.message_queue.put(("log", (f"Error starting recording: {e}", "error")))
             self.message_queue.put(("error", str(e)))
 
@@ -841,7 +897,17 @@ class MeetingTranscriberGUI(QMainWindow):
                     self.message_queue.put(("log", (clean, "progress")))
 
             transcriber = Transcriber()
-            transcription_result = transcriber.transcribe_with_retry(audio_file, progress_callback=transcription_progress)
+            valid_audio_files = [p for p in audio_files if p.exists() and p.stat().st_size > 0]
+            if len(valid_audio_files) > 1:
+                transcription_result = transcriber.transcribe_audio_files_with_retry(
+                    valid_audio_files,
+                    progress_callback=transcription_progress
+                )
+            else:
+                transcription_result = transcriber.transcribe_with_retry(
+                    valid_audio_files[0] if valid_audio_files else audio_file,
+                    progress_callback=transcription_progress
+                )
             transcript_text = transcriber.format_transcript(transcription_result)
             self.file_manager.save_transcript(transcript_text)
             self.message_queue.put(("transcript", transcript_text))
@@ -873,6 +939,7 @@ class MeetingTranscriberGUI(QMainWindow):
             self.message_queue.put(("complete", str(self.file_manager.meeting_dir)))
 
         except Exception as e:
+            logger.exception("Error in live processing thread")
             import traceback; traceback.print_exc()
             self.message_queue.put(("log", (f"Processing error: {e}", "error")))
             self.message_queue.put(("error", str(e)))
@@ -960,6 +1027,9 @@ class MeetingTranscriberGUI(QMainWindow):
 
 def main():
     """Main entry point for the GUI application."""
+    log_path = setup_logging()
+    logger.info("GUI main started. log_file=%s", log_path)
+
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLESHEET)
     window = MeetingTranscriberGUI()

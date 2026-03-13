@@ -39,6 +39,13 @@ class Config:
         # LLM Settings for Summarization (OpenAI GPT)
         self.llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
         self.temperature: float = float(os.getenv("TEMPERATURE", "0.3"))
+
+        # Hugging Face transformers fallback summarization
+        self.hf_summary_model: str = os.getenv("HF_SUMMARY_MODEL", "facebook/bart-large-cnn")
+        self.hf_summary_max_chars: int = int(os.getenv("HF_SUMMARY_MAX_CHARS", "12000"))
+
+        # Logging
+        self.log_file: Path = Path(os.getenv("LOG_FILE", str(Path("logs") / "audio_recorder.log")))
         
     def validate(self) -> tuple[bool, list[str]]:
         """Validate configuration.
@@ -47,10 +54,6 @@ class Config:
             tuple: (is_valid, list of error messages)
         """
         errors = []
-        
-        if not self.openai_api_key:
-            errors.append("OPENAI_API_KEY is not set. Required for transcription and summarization.")
-        
         return len(errors) == 0, errors
     
     def __str__(self) -> str:
@@ -63,6 +66,7 @@ Configuration:
   Whisper Language: {self.whisper_language}
   Local Whisper Model: {self.local_whisper_model}
   LLM Model: {self.llm_model}
+  HF Summary Model: {self.hf_summary_model}
   Output Directory: {self.output_dir}
   Min Speakers: {self.min_speakers}
   Max Speakers: {self.max_speakers}

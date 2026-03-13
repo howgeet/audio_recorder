@@ -311,6 +311,17 @@ LOCAL_WHISPER_MODEL=base     # Offline fallback model (tiny/base/small/medium/la
 ```env
 LLM_MODEL=gpt-4o-mini    # Options: gpt-4o-mini, gpt-4o, gpt-3.5-turbo
 TEMPERATURE=0.3          # Lower = more focused, Higher = more creative
+
+# Hugging Face transformers fallback (used if OpenAI summarization fails)
+HF_SUMMARY_MODEL=facebook/bart-large-cnn
+HF_SUMMARY_MAX_CHARS=12000
+```
+
+### Logging Settings
+
+```env
+# Persistent diagnostic log file (relative paths are resolved from project root)
+LOG_FILE=logs/audio_recorder.log
 ```
 
 ### Output Settings
@@ -402,6 +413,24 @@ ffmpeg -version
 3. Try processing a smaller audio file first
 
 ### General Issues
+
+#### Issue: OpenAI summarization fails (timeout/network/API error)
+
+**Behavior**:
+- The app first tries OpenAI ChatGPT summarization.
+- If that fails, it automatically falls back to **Hugging Face transformers** using the Whisper transcript text.
+
+If both fail, check the log file for full stack traces.
+
+#### Issue: Need diagnostic logs
+
+The app writes logs to:
+
+```text
+logs/audio_recorder.log
+```
+
+You can override the path using `LOG_FILE` in `.env`.
 
 #### Issue: "OpenAI API key is not configured"
 
