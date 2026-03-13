@@ -335,6 +335,10 @@ OUTPUT_DIR=outputs       # Directory for saving files
 ```env
 MIN_SPEAKERS=2          # Minimum expected speakers
 MAX_SPEAKERS=10         # Maximum expected speakers
+
+# Advanced diarization (recommended)
+USE_PYANNOTE_DIARIZATION=true
+PYANNOTE_MODEL=pyannote/speaker-diarization-3.1
 ```
 
 ---
@@ -455,6 +459,18 @@ You can override the path using `LOG_FILE` in `.env`.
 3. Use virtual audio cable software:
    - Install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
    - Configure Windows to route audio through virtual cable
+
+#### Issue: Speaker separation is weak / incorrect
+
+**Current behavior**:
+- The app now tries **pyannote.audio** diarization first (voice-based speaker turns).
+- If pyannote is unavailable or fails, it falls back to pause-based heuristic diarization.
+
+**How to improve results**:
+1. Install dependencies: `pip install -r requirements.txt`
+2. Set `HUGGINGFACE_TOKEN` in `.env` (required for gated pyannote models)
+3. Ensure your token has accepted the model terms on Hugging Face
+4. Keep `USE_PYANNOTE_DIARIZATION=true`
 
 #### Issue: "No module named 'sounddevice'" or similar
 

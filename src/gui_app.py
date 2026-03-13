@@ -551,7 +551,8 @@ class MeetingTranscriberGUI(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedWidth(300)
         self.progress_bar.setMaximum(1000)
-        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         self.progress_bar.hide()
         bar.addPermanentWidget(self.progress_bar)
 
@@ -688,7 +689,7 @@ class MeetingTranscriberGUI(QMainWindow):
         self._set_text(self.transcript_edit, "Processing file...")
         self._set_text(self.summary_edit, "Processing file...")
         self._set_text(self.notes_edit, "Processing file...")
-        self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self._log_message(f"Starting to process file: {self.selected_file_path.name}", "progress")
         threading.Thread(target=self._file_processing_thread, daemon=True).start()
@@ -861,11 +862,14 @@ class MeetingTranscriberGUI(QMainWindow):
         self.is_recording = False
         self._timer.stop()
         self.level_bar.setValue(0)
+        self._set_text(self.transcript_edit, "Generating transcript...")
+        self._set_text(self.summary_edit, "Generating summary...")
+        self._set_text(self.notes_edit, "Generating speaker notes...")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.process_file_btn.setEnabled(False)
         self.status_indicator.set_status("processing", "Processing...")
-        self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
         self._log_message("Stopping recording and starting processing...", "progress")
         threading.Thread(target=self._processing_thread, daemon=True).start()
@@ -963,6 +967,8 @@ class MeetingTranscriberGUI(QMainWindow):
                     self._set_text(self.notes_edit, data)
 
                 elif msg_type == "progress":
+                    if self.progress_bar.maximum() == 0:
+                        self.progress_bar.setRange(0, 1000)
                     self.progress_bar.setValue(int(data))
 
                 elif msg_type == "complete":
@@ -981,6 +987,7 @@ class MeetingTranscriberGUI(QMainWindow):
                 elif msg_type == "error":
                     self.is_processing = False
                     self.status_indicator.set_status("error", "Error")
+                    self.progress_bar.setRange(0, 1000)
                     self.progress_bar.hide()
                     self.start_btn.setEnabled(True)
                     self.stop_btn.setEnabled(False)
@@ -993,6 +1000,7 @@ class MeetingTranscriberGUI(QMainWindow):
 
     def _on_complete(self):
         self.status_indicator.set_status("complete", "Complete")
+        self.progress_bar.setRange(0, 1000)
         self.progress_bar.hide()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)

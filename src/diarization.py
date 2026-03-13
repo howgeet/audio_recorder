@@ -1,12 +1,13 @@
 """Speaker diarization module."""
 
-import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import requests
-import json
 
 from src.config import config
+
+
+logger = logging.getLogger(__name__)
 
 class SpeakerDiarizer:
     """Handles speaker diarization using various methods."""
@@ -15,6 +16,9 @@ class SpeakerDiarizer:
         """Initialize the diarizer."""
         self.min_speakers = config.min_speakers
         self.max_speakers = config.max_speakers
+        self.use_pyannote = config.use_pyannote_diarization
+        self.pyannote_model = config.pyannote_model
+        self.hf_token = config.huggingface_token
     
     def perform_diarization(self, audio_file: Path, transcription_result: Dict[str, Any]) -> Dict[str, Any]:
         """Perform speaker diarization.
@@ -28,40 +32,150 @@ class SpeakerDiarizer:
         """
         print(f"\n👥 Starting speaker diarization...")
         
-        # For now, we'll use a simplified approach using OpenAI's capabilities
-        # In production, you might want to use pyannote.audio or similar
-        
         try:
-            # Simple heuristic: assign speakers based on pauses
             segments = transcription_result.get('segments', [])
             
             if not segments:
                 print("⚠️  No segments available for diarization")
+                logger.warning("No transcription segments available for diarization")
                 return {
                     'segments': [],
                     'speakers': []
                 }
+
+            # Preferred path: pyannote diarization + segment alignment
+            if self.use_pyannote:
+                try:
+                    turns = self._run_pyannote_diarization(audio_file)
+                    if turns:
+                        diarized_segments = self._assign_speakers_from_turns(segments, turns)
+                        speakers = sorted({seg['speaker'] for seg in diarized_segments})
+                        print("✅ Diarization completed with pyannote")
+                        print(f"   Detected {len(speakers)} speakers")
+                        logger.info(
+                            "pyannote diarization complete. file=%s turns=%d speakers=%d",
+                            audio_file,
+                            len(turns),
+                            len(speakers),
+                        )
+                        return {
+                            'segments': diarized_segments,
+                            'speakers': speakers,
+                            'method': 'pyannote'
+                        }
+
+                    logger.warning("pyannote produced no turns; falling back to heuristic diarization")
+                except Exception as pyannote_error:
+                    logger.exception("pyannote diarization failed; falling back to heuristic")
+                    print(f"⚠️  Advanced diarization unavailable: {pyannote_error}")
             
+            # Fallback path: simple heuristic based on pauses
             diarized_segments = self._simple_diarization(segments)
             
             # Count unique speakers
             speakers = set(seg['speaker'] for seg in diarized_segments)
             
-            print(f"✅ Diarization completed")
+            print(f"✅ Diarization completed (heuristic fallback)")
             print(f"   Detected {len(speakers)} speakers")
+            logger.info("heuristic diarization complete. file=%s speakers=%d", audio_file, len(speakers))
             
             return {
                 'segments': diarized_segments,
-                'speakers': list(speakers)
+                'speakers': sorted(list(speakers)),
+                'method': 'heuristic'
             }
             
         except Exception as e:
             print(f"❌ Diarization error: {e}")
+            logger.exception("Diarization failed entirely")
             # Return original segments without speaker labels
             return {
                 'segments': transcription_result.get('segments', []),
                 'speakers': ['Speaker 1']
             }
+
+    def _run_pyannote_diarization(self, audio_file: Path) -> List[Dict[str, Any]]:
+        """Run pyannote diarization and return time turns with raw speaker labels."""
+        try:
+            import torch
+            from pyannote.audio import Pipeline
+        except Exception as import_error:
+            raise RuntimeError(
+                "pyannote diarization is unavailable. Install dependencies: pip install pyannote.audio"
+            ) from import_error
+
+        pipeline_kwargs = {}
+        if self.hf_token:
+            pipeline_kwargs["use_auth_token"] = self.hf_token
+
+        pipeline = Pipeline.from_pretrained(self.pyannote_model, **pipeline_kwargs)
+
+        if hasattr(pipeline, "to"):
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            pipeline.to(device)
+            logger.info("pyannote pipeline device=%s", device)
+
+        diarization = pipeline(
+            str(audio_file),
+            min_speakers=self.min_speakers,
+            max_speakers=self.max_speakers,
+        )
+
+        turns: List[Dict[str, Any]] = []
+        for turn, _, label in diarization.itertracks(yield_label=True):
+            turns.append({
+                "start": float(turn.start),
+                "end": float(turn.end),
+                "speaker": str(label),
+            })
+
+        turns.sort(key=lambda t: (t["start"], t["end"]))
+        return turns
+
+    def _assign_speakers_from_turns(
+        self,
+        segments: List[Dict[str, Any]],
+        turns: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Assign a speaker to each Whisper segment using maximum overlap with diarization turns."""
+        diarized: List[Dict[str, Any]] = []
+        speaker_map: Dict[str, str] = {}
+        next_speaker_idx = 1
+
+        for segment in segments:
+            seg_start = float(segment.get("start", 0.0) or 0.0)
+            seg_end = float(segment.get("end", seg_start) or seg_start)
+
+            best_label = None
+            best_overlap = 0.0
+
+            for turn in turns:
+                overlap = max(0.0, min(seg_end, turn["end"]) - max(seg_start, turn["start"]))
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_label = turn["speaker"]
+
+            # If no overlap, use nearest diarization turn center by distance
+            if best_label is None and turns:
+                seg_mid = (seg_start + seg_end) / 2.0
+                nearest = min(
+                    turns,
+                    key=lambda t: abs(seg_mid - ((t["start"] + t["end"]) / 2.0)),
+                )
+                best_label = nearest["speaker"]
+
+            if best_label is None:
+                best_label = "unknown"
+
+            if best_label not in speaker_map:
+                speaker_map[best_label] = f"Speaker {next_speaker_idx}"
+                next_speaker_idx += 1
+
+            seg_copy = segment.copy()
+            seg_copy["speaker"] = speaker_map[best_label]
+            diarized.append(seg_copy)
+
+        return diarized
     
     def _simple_diarization(self, segments: List[Dict]) -> List[Dict]:
         """Simple diarization based on pauses between segments.

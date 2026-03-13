@@ -35,6 +35,8 @@ class Config:
         # Diarization Settings
         self.min_speakers: int = int(os.getenv("MIN_SPEAKERS", "2"))
         self.max_speakers: int = int(os.getenv("MAX_SPEAKERS", "10"))
+        self.use_pyannote_diarization: bool = os.getenv("USE_PYANNOTE_DIARIZATION", "true").lower() in {"1", "true", "yes", "on"}
+        self.pyannote_model: str = os.getenv("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1")
         
         # LLM Settings for Summarization (OpenAI GPT)
         self.llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -70,6 +72,8 @@ Configuration:
   Output Directory: {self.output_dir}
   Min Speakers: {self.min_speakers}
   Max Speakers: {self.max_speakers}
+  Use Pyannote Diarization: {self.use_pyannote_diarization}
+  Pyannote Model: {self.pyannote_model}
   OpenAI API Key: {'Set' if self.openai_api_key else 'Not Set'}
 """
 
