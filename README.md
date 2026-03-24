@@ -304,6 +304,7 @@ CHUNK_SIZE=1024        # Audio buffer size
 ```env
 WHISPER_MODEL=whisper-1      # OpenAI Whisper model
 LOCAL_WHISPER_MODEL=base     # Offline fallback model (tiny/base/small/medium/large-v2/large-v3)
+WHISPER_LANGUAGE=            # Leave blank for auto-detect (recommended). Set to 'tr' for Turkish, 'en' for English, etc.
 ```
 
 ### Summarization Settings

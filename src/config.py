@@ -24,7 +24,8 @@ class Config:
         
         # Transcription Settings (OpenAI Whisper)
         self.transcription_model: str = os.getenv("WHISPER_MODEL", "whisper-1")
-        self.whisper_language: str = os.getenv("WHISPER_LANGUAGE", "tr")
+        _lang = os.getenv("WHISPER_LANGUAGE", "").strip()
+        self.whisper_language: Optional[str] = _lang if _lang else None
         self.local_whisper_model: str = os.getenv("LOCAL_WHISPER_MODEL", "medium")
         self.languages: list = ["tr", "en"]  # Turkish and English
         

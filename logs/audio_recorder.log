@@ -92,3 +92,37 @@ RuntimeError: pyannote diarization is unavailable. Install dependencies: pip ins
 2026-03-13 13:56:17 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
 2026-03-13 13:56:17 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
 2026-03-13 13:56:18 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 14:09:43 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 14:09:43 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-13 14:09:43 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-23 15:01:49 | INFO | src.logging_utils | Logging initialized. Log file: C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-23 15:01:49 | INFO | __main__ | GUI main started. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-23 15:01:49 | INFO | __main__ | GUI initialized. log_file=C:\Docs\audio_recorder_v1\logs\audio_recorder.log
+2026-03-23 15:40:19 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:40:47 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:41:09 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:41:30 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:41:51 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:42:12 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:42:34 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:42:45 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/audio/transcriptions "HTTP/1.1 200 OK"
+2026-03-23 15:42:45 | ERROR | src.diarization | pyannote diarization failed; falling back to heuristic
+Traceback (most recent call last):
+  File "C:\Docs\audio_recorder_v1\src\diarization.py", line 100, in _run_pyannote_diarization
+    import torch
+ModuleNotFoundError: No module named 'torch'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Docs\audio_recorder_v1\src\diarization.py", line 49, in perform_diarization
+    turns = self._run_pyannote_diarization(audio_file)
+  File "C:\Docs\audio_recorder_v1\src\diarization.py", line 103, in _run_pyannote_diarization
+    raise RuntimeError(
+        "pyannote diarization is unavailable. Install dependencies: pip install pyannote.audio"
+    ) from import_error
+RuntimeError: pyannote diarization is unavailable. Install dependencies: pip install pyannote.audio
+2026-03-23 15:42:45 | INFO | src.diarization | heuristic diarization complete. file=outputs\meeting_20260323_150240\audio_20260323_150240_part001.wav speakers=10
+2026-03-23 15:42:46 | INFO | src.summarization | Starting summarization. language=turkish transcript_chars=29247
+2026-03-23 15:43:03 | INFO | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-23 15:43:03 | INFO | src.summarization | Summarization completed with OpenAI in 17.04 seconds

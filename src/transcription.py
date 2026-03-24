@@ -51,7 +51,7 @@ class LocalTranscriber:
             if progress_callback:
                 progress_callback(msg)
 
-        selected_language = language or getattr(config, "whisper_language", "tr")
+        selected_language = language or getattr(config, "whisper_language", None)
 
         log(f"\n🖥️  Starting local transcription (faster-whisper {self.model_size})...")
         log(f"   File: {audio_file.name}")
@@ -99,7 +99,7 @@ class Transcriber:
         """Initialize the transcriber."""
         self.client = OpenAI(api_key=config.openai_api_key or "")
         self.model = config.transcription_model
-        self.default_language = getattr(config, "whisper_language", "tr")
+        self.default_language = getattr(config, "whisper_language", None)
         self.local_model_size = getattr(config, "local_whisper_model", "medium")
         
     def _get_file_size(self, audio_file: Path) -> int:
