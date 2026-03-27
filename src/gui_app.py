@@ -877,6 +877,13 @@ class MeetingTranscriberGUI(QMainWindow):
     def _processing_thread(self):
         try:
             self.message_queue.put(("progress", 100))
+            # Wait for _recording_thread to finish initializing audio_capture
+            waited = 0
+            while self.audio_capture is None and waited < 5.0:
+                time.sleep(0.1)
+                waited += 0.1
+            if self.audio_capture is None:
+                raise Exception("Audio capture was never initialized — recording may have failed to start.")
             audio_file = self.audio_capture.stop_recording()
             audio_files = []
             if hasattr(self.audio_capture, 'get_recorded_files'):
