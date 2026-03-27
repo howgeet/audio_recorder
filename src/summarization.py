@@ -85,7 +85,7 @@ class MeetingSummarizer:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert meeting analyst who creates comprehensive, well-structured meeting summaries."
+                    "content": "You are an expert meeting analyst who creates comprehensive, detailed, and long-form meeting summaries. Your goal is to capture as much meaningful information as possible from the transcript — do not truncate sections or give one-line answers. Write in full sentences with thorough explanations for every section."
                 },
                 {
                     "role": "user",
@@ -93,7 +93,7 @@ class MeetingSummarizer:
                 }
             ],
             temperature=self.temperature,
-            max_tokens=2000
+            max_tokens=4000
         )
         return response.choices[0].message.content
 
@@ -202,58 +202,102 @@ class MeetingSummarizer:
         """
         if is_turkish:
             prompt = f"""
-Aşağıdaki toplantı transkriptini analiz edin ve kapsamlı bir özet oluşturun.
+Aşağıdaki toplantı transkriptini ayrıntılı biçimde analiz edin ve kapsamlı, uzun bir özet oluşturun.
+Her bölümü mümkün olduğunca ayrıntılı doldurun; kısa tutmaya çalışmayın.
 
 Özet aşağıdaki bölümleri içermelidir:
 
-1. **GENEL ÖZET** (2-3 cümle)
-   - Toplantının ana konusu ve amacı
+1. **GENEL ÖZET**
+   - Toplantının ana konusu, amacı ve bağlamı
+   - Katılımcı sayısı ve genel atmosfer
+   - Toplantının süresi ve kapsamı hakkında genel izlenim
 
-2. **ANA KONU BAŞLIKLARI**
-   - Tartışılan tüm önemli konuları listeleyin
-   - Her konu için kısa açıklama
+2. **KATILIMCILAR VE ROLLER**
+   - Transkriptten tespit edilen konuşmacılar ve varsa unvanları/rolleri
+   - Her konuşmacının toplantıdaki katkı odağı
 
-3. **ÖNEMLİ KARARLAR**
-   - Alınan kararları listeleyin
-   - Kim tarafından alındı (biliyorsak)
+3. **DETAYLI KONU BAŞLIKLARI**
+   - Tartışılan her konuyu ayrı başlık altında ele alın
+   - Her konu için: ne tartışıldı, hangi görüşler dile getirildi, hangi sorunlar öne çıktı
+   - Konuların birbirleriyle ilişkisi
 
-4. **EYLEM MADDELERI**
-   - Yapılması gereken görevler
-   - Sorumlular (önemli ise)
-   - Süreler (bahsedildiyse)
+4. **ÖNEMLİ KARARLAR**
+   - Alınan tüm kararları madde madde listeleyin
+   - Kararın kim tarafından önerildiği / kimin onayladığı (biliniyorsa)
+   - Karara zemin hazırlayan tartışma özeti
 
-5. **SONUÇLAR VE SONRAKI ADIMLAR**
-   - Toplantının genel sonuçları
-   - Gelecek toplantılar veya takip edilecekler
+5. **EYLEM MADDELERİ**
+   - Yapılması gereken her görevi listeleyin
+   - Sorumlu kişi / ekip (bahsedildiyse)
+   - Teslim tarihi veya süre (bahsedildiyse)
+   - Öncelik seviyesi (tartışmadan çıkarılabiliyorsa)
+
+6. **ÖNEMLİ RAKAMLAR, TARİHLER VE VERİLER**
+   - Toplantıda geçen bütçe, fiyat, yüzde, adet gibi sayısal bilgiler
+   - Bahsedilen tarihler, son teslim tarihleri, kilometre taşları
+   - Referans verilen belgeler, sistemler veya araçlar
+
+7. **ÖNEMLI ALINTI VE VURGULAR**
+   - Bir konuşmacının özellikle vurguladığı kritik ifadeler (kısa alıntı şeklinde)
+   - Anlaşmazlık veya uzlaşma noktaları
+
+8. **SONUÇLAR VE SONRAKİ ADIMLAR**
+   - Toplantının genel sonuçları ve başarılan hedefler
+   - Çözüme kavuşturulamayan açık konular
+   - Planlanan takip toplantıları veya iletişimler
+   - Kısa vadeli ve uzun vadeli beklentiler
 
 TRANSKRIPT:
 {transcript}
 """
         else:
             prompt = f"""
-Analyze the following meeting transcript and create a comprehensive summary.
+Analyze the following meeting transcript thoroughly and produce a detailed, long-form summary.
+Do not truncate or abbreviate — populate every section as fully as the transcript allows.
 
-The summary should include the following sections:
+The summary must include the following sections:
 
-1. **EXECUTIVE SUMMARY** (2-3 sentences)
-   - Main topic and purpose of the meeting
+1. **EXECUTIVE SUMMARY**
+   - Main topic, purpose, and context of the meeting
+   - Overall tone and outcome in 3–5 sentences
+   - High-level takeaway for someone who was not present
 
-2. **KEY DISCUSSION POINTS**
-   - List all important topics discussed
-   - Brief explanation for each topic
+2. **PARTICIPANTS AND ROLES**
+   - Speakers identified in the transcript and their apparent roles/titles
+   - Each participant's primary area of contribution during the meeting
 
-3. **DECISIONS MADE**
-   - List all decisions made during the meeting
-   - Who made them (if known)
+3. **DETAILED DISCUSSION POINTS**
+   - Cover every significant topic discussed, each under its own sub-heading
+   - For each topic: what was discussed, which viewpoints were raised, what problems or concerns emerged
+   - Note any disagreements or differing perspectives between participants
+   - Describe how topics related to or built upon each other
 
-4. **ACTION ITEMS**
-   - Tasks that need to be completed
-   - Responsible parties (if mentioned)
-   - Deadlines (if mentioned)
+4. **DECISIONS MADE**
+   - List every decision reached, with full context
+   - Who proposed / endorsed each decision (if identifiable)
+   - Brief rationale or discussion that led to the decision
 
-5. **CONCLUSIONS AND NEXT STEPS**
-   - Overall outcomes of the meeting
-   - Future meetings or follow-ups
+5. **ACTION ITEMS**
+   - Every task or follow-up commitment mentioned
+   - Responsible person or team (if stated)
+   - Deadline or timeframe (if stated)
+   - Implied priority based on the discussion tone
+
+6. **KEY FIGURES, DATES, AND DATA**
+   - All numerical data: budgets, prices, percentages, quantities, metrics
+   - Specific dates, deadlines, and milestones mentioned
+   - Referenced documents, systems, tools, or external resources
+
+7. **NOTABLE QUOTES AND HIGHLIGHTS**
+   - Critical statements made by participants (brief verbatim or near-verbatim)
+   - Points of strong agreement or contention
+   - Any risks, blockers, or concerns explicitly raised
+
+8. **CONCLUSIONS AND NEXT STEPS**
+   - Overall outcomes and goals achieved
+   - Open issues that were not resolved
+   - Planned follow-up meetings or communications
+   - Short-term and long-term expectations going forward
 
 TRANSCRIPT:
 {transcript}
